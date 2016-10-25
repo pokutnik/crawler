@@ -9,7 +9,7 @@ import (
 
 var rootURL = flag.String("url", "https://golang.org/pkg/", "full URL to start crawling from")
 var outDir = flag.String("out", "/tmp/crawl", "directory to store files")
-var nWorkers = flag.Uint("n", 16, "number of dowload workers")
+var nWorkers = flag.Uint("n", 16, "number of download workers")
 
 func main() {
 	flag.Parse()

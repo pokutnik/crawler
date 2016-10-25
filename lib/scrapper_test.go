@@ -7,7 +7,6 @@ import (
 )
 
 func TestScraper(t *testing.T) {
-	//const START_URL = "http://www.gistatgroup.com/"
 	const START_URL = "https://golang.org/pkg/"
 	outDir, err := ioutil.TempDir("", ".scrapetest")
 	if err != nil {
