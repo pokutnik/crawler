@@ -3,8 +3,10 @@ package lib
 import (
 	"log"
 	"net/url"
+	"runtime"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Scraper struct {
@@ -96,6 +98,7 @@ func (s *Scraper) sendReady(task *Task) {
 func (s *Scraper) runCoordinator() {
 	defer s.wgWorkers.Done()
 	log.Print("[coord] starting...")
+	statusTicker := time.NewTicker(time.Millisecond * 500).C
 
 	s.coMaybeAddNew(s.Root)
 	s.FetchQ <- NewTask(s.Root, s.outDir)
@@ -135,6 +138,9 @@ func (s *Scraper) runCoordinator() {
 					s.scrapingDone()
 				}
 			}
+			break
+		case <-statusTicker:
+			s.logStatus()
 		}
 		if s.DoneQ == nil && s.ReadyQ == nil {
 			break
@@ -142,6 +148,8 @@ func (s *Scraper) runCoordinator() {
 	}
 
 	log.Print("[coord] stopping...")
+	runtime.GC()
+	s.logStatus()
 }
 
 func (s *Scraper) scrapingDone() {
@@ -159,4 +167,11 @@ func (s *Scraper) runWorker() {
 		s.sendReady(task)
 	}
 	log.Printf("[worker] exit...")
+}
+
+func (s *Scraper) logStatus() {
+	log.Printf("[debug] added: %v\tdone: %v", len(s.co_added), len(s.co_done))
+	var mem runtime.MemStats
+	runtime.ReadMemStats(&mem)
+	log.Printf("[mem] %v, diff %v", mem.Alloc, mem.TotalAlloc-mem.Alloc)
 }

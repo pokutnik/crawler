@@ -2,6 +2,8 @@ package lib
 
 import (
 	"io/ioutil"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"testing"
 )
@@ -18,5 +20,6 @@ func TestScraper(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.Start()
+	http.ListenAndServe(":8080", nil)
 	s.WaitTillDone()
 }
