@@ -12,10 +12,10 @@ import (
 type Scraper struct {
 	Root      *url.URL
 	FetchQ    chan *Task
-	DoneQ     chan *Task
 	ReadyQ    chan *Task
 	co_added  map[string]bool
 	co_done   map[string]bool
+	co_ready  []*url.URL
 	wgWorkers sync.WaitGroup
 	outDir    string
 	nWorkers  uint
@@ -38,7 +38,6 @@ func New(root string, outDir string, nWorkers uint) (*Scraper, error) {
 		FetchQ: make(chan *Task, 1),
 
 		// for coordinators
-		DoneQ:    make(chan *Task, 1),
 		ReadyQ:   make(chan *Task, 1),
 		co_added: make(map[string]bool),
 		co_done:  make(map[string]bool),
@@ -88,9 +87,6 @@ func (s *Scraper) coMaybeAddNew(l *url.URL) bool {
 	return !ok
 }
 
-func (s *Scraper) sendDone(task *Task) {
-	s.DoneQ <- task
-}
 func (s *Scraper) sendReady(task *Task) {
 	s.ReadyQ <- task
 }
@@ -101,48 +97,35 @@ func (s *Scraper) runCoordinator() {
 	statusTicker := time.NewTicker(time.Millisecond * 500).C
 
 	s.coMaybeAddNew(s.Root)
-	s.FetchQ <- NewTask(s.Root, s.outDir)
+	s.co_ready = append(s.co_ready, s.Root)
+	nextTask, out := s.coNextTask()
 	// TODO: Add restore option
 
 	for {
 		select {
+		case out <- nextTask:
+			s.coShrink()
+			nextTask, out = s.coNextTask()
 		case task, ok := <-s.ReadyQ:
 			if !ok {
 				s.ReadyQ = nil
 			} else {
 				log.Printf("[coord] done: %v", task.location)
 
-				newLinks := make([]*url.URL, 0)
 				for _, link := range task.Links {
 					if s.shouldFetch(link) && s.coMaybeAddNew(link) {
-						newLinks = append(newLinks, link)
+						s.co_ready = append(s.co_ready, link)
 					}
 				}
-				if len(newLinks) > 0 {
-					log.Printf("[coord] found for %v -> %v", task.location, newLinks)
-				}
-
-				// TODO: replace FetchQ with some sort of persistent queue
-				go func(newLinks []*url.URL, task *Task) {
-					for _, link := range newLinks {
-						s.FetchQ <- NewTask(link, s.outDir)
-					}
-					s.sendDone(task)
-				}(newLinks, task)
-			}
-		case task, ok := <-s.DoneQ:
-			if !ok {
-				s.DoneQ = nil
-			} else {
+				nextTask, out = s.coNextTask()
 				if s.coMarkDone(task) {
 					s.scrapingDone()
 				}
 			}
-			break
 		case <-statusTicker:
 			s.logStatus()
 		}
-		if s.DoneQ == nil && s.ReadyQ == nil {
+		if s.ReadyQ == nil {
 			break
 		}
 	}
@@ -152,11 +135,22 @@ func (s *Scraper) runCoordinator() {
 	s.logStatus()
 }
 
+func (s *Scraper) coShrink() {
+	last := len(s.co_ready) - 1
+	s.co_ready = s.co_ready[:last]
+}
+func (s *Scraper) coNextTask() (*Task, chan *Task) {
+	if len(s.co_ready) == 0 {
+		return nil, nil
+	}
+	link := s.co_ready[len(s.co_ready)-1]
+	return NewTask(link, s.outDir), s.FetchQ
+}
+
 func (s *Scraper) scrapingDone() {
 	log.Printf("[info] scrapingDone shuting down")
 	close(s.FetchQ)
 	close(s.ReadyQ)
-	close(s.DoneQ)
 }
 
 func (s *Scraper) runWorker() {
@@ -170,8 +164,8 @@ func (s *Scraper) runWorker() {
 }
 
 func (s *Scraper) logStatus() {
-	log.Printf("[debug] added: %v\tdone: %v", len(s.co_added), len(s.co_done))
+	log.Printf("[debug] added: %v\tdone: %v\tready: %v", len(s.co_added), len(s.co_done), len(s.co_ready))
 	var mem runtime.MemStats
 	runtime.ReadMemStats(&mem)
-	log.Printf("[mem] %v, diff %v", mem.Alloc, mem.TotalAlloc-mem.Alloc)
+	log.Printf("[mem] %v", mem.Alloc)
 }
