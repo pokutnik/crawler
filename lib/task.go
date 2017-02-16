@@ -2,7 +2,6 @@ package lib
 
 import (
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
@@ -52,12 +51,11 @@ func (task *Task) Execute() {
 		if IsHTML(ct) {
 			_reader, htmlW := io.Pipe()
 			contentReader = _reader
-			defer contentReader.Close()
-			htmlR := ioutil.NopCloser(io.TeeReader(resp.Body, htmlW))
+			defer _reader.Close()
+			htmlR := io.TeeReader(resp.Body, htmlW)
 			wg.Add(1)
 			go func() {
 				defer htmlW.Close()
-				defer htmlR.Close()
 				log.Printf("[task] e+ %v", target_url)
 				task.ExtractLinks(htmlR)
 				log.Printf("[task] e- %v", target_url)
@@ -74,9 +72,10 @@ func (task *Task) Execute() {
 	log.Printf("[task] -- %v", target_url)
 }
 
-func (task *Task) SaveContent(body io.Reader) {
+func (task *Task) SaveContent(body io.ReadCloser) {
 	fileWriter := task.outFile()
 	defer fileWriter.Close()
+	defer body.Close()
 	n, err := io.Copy(fileWriter, body)
 	if err != nil {
 		log.Fatal("[error] Copy %v. Error: %v", task.location, err)
@@ -115,10 +114,10 @@ func (task *Task) ExtractLinks(body io.Reader) {
 	}
 	for _, ref := range links {
 		fullUrl, err := task.location.Parse(ref)
-		fullUrl.Fragment = ""
 		if err != nil {
 			continue
 		}
+		fullUrl.Fragment = ""
 		task.Links = append(task.Links, fullUrl)
 	}
 	return

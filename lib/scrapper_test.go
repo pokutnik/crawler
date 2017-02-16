@@ -2,6 +2,7 @@ package lib
 
 import (
 	"io/ioutil"
+	_ "net/http/pprof"
 	"os"
 	"testing"
 )
